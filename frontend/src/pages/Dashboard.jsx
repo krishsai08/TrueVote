@@ -116,8 +116,17 @@ export default function Dashboard() {
   }, [user, userData]);
 
   const handleRowClick = (election) => {
-    if (user.role === 'admin') navigate(`/admin/elections/${election._id}`);
-    else if (election.resultsReleased) navigate(`/results/${election._id}`);
+    if (user.role === 'admin') {
+      navigate(`/admin/elections/${election._id}`);
+    } else {
+      // For regular users, only allow navigation if results are released
+      if (election.resultsReleased) {
+        navigate(`/results/${election._id}`);
+      } else {
+        // Show a message that results are not yet released
+        alert('Results for this election have not been released yet. Please wait for the administrator to release the results.');
+      }
+    }
   };
 
   const releaseResults = async (electionId) => {
@@ -329,8 +338,12 @@ export default function Dashboard() {
                         Delete
                       </button>
                     )}
-                    {user.role === 'user' && election.resultsReleased && (
-                      <span style={styles.viewResultsBadge}>👁️ View Results</span>
+                    {user.role === 'user' && (
+                      election.resultsReleased ? (
+                        <span style={styles.viewResultsBadge}>👁️ View Results</span>
+                      ) : (
+                        <span style={styles.waitingBadge}>⏳ Results Pending</span>
+                      )
                     )}
                   </div>
                 </div>
@@ -797,6 +810,15 @@ const styles = {
   viewResultsBadge: {
     backgroundColor: '#dcfce7',
     color: '#166534',
+    padding: '8px 12px',
+    borderRadius: '8px',
+    fontSize: '0.875rem',
+    fontWeight: '500'
+  },
+
+  waitingBadge: {
+    backgroundColor: '#fef3c7',
+    color: '#92400e',
     padding: '8px 12px',
     borderRadius: '8px',
     fontSize: '0.875rem',

@@ -101,12 +101,34 @@ router.get('/user/:id', auth, async (req, res) => {
   }
 });
 
+// Check if results are released (without fetching actual results)
+router.get('/:id/results/status', auth, async (req, res) => {
+  try {
+    const election = await Election.findById(req.params.id);
+    if (!election) return res.status(404).json({ message: 'Election not found' });
+    
+    res.json({ 
+      electionId: election._id,
+      resultsReleased: election.resultsReleased,
+      message: election.resultsReleased ? 'Results are available' : 'Results not yet released'
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // Public results (for released elections)
 router.get('/:id/results/public', auth, async (req, res) => {
   try {
     const election = await Election.findById(req.params.id);
     if (!election) return res.status(404).json({ message: 'Election not found' });
-    if (!election.resultsReleased) return res.status(403).json({ message: 'Results not yet released' });
+    if (!election.resultsReleased) {
+      return res.status(403).json({ 
+        message: 'Results not yet released by administrator',
+        code: 'RESULTS_NOT_RELEASED'
+      });
+    }
 
     const byCandidate = await Vote.aggregate([
       { $match: { electionId: election._id, option: { $ne: "" } } },

@@ -14,6 +14,7 @@ import AdminResults from "./pages/AdminResults";
 import AdminAnnouncements from "./pages/AdminAnnouncements";
 import AdminFraudLogs from "./pages/AdminFraudLogs";
 import ConnectionStatus from "./components/ConnectionStatus";
+import ResultsGuard from "./components/ResultsGuard";
 import { useAuth } from "./context/AuthContext";
 
 // 🔒 Wrapper for protected routes
@@ -87,7 +88,13 @@ export default function App() {
             <Route path="/admin/announcements" element={<PrivateRoute roles={["admin"]}><AdminAnnouncements /></PrivateRoute>} />
 
             {/* User results */}
-            <Route path="/results/:id" element={<PrivateRoute roles={["user", "admin"]}><UserResults /></PrivateRoute>} />
+            <Route path="/results/:id" element={
+              <PrivateRoute roles={["user", "admin"]}>
+                <ResultsGuard>
+                  <UserResults />
+                </ResultsGuard>
+              </PrivateRoute>
+            } />
 
             {/* 404 */}
             <Route path="*" element={<h2>404 - Page Not Found</h2>} />

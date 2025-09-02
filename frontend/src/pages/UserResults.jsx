@@ -17,17 +17,24 @@ export default function UserResults() {
         const { data } = await api.get(`/elections/user/${id}`);
         setElection(data.election);
 
-        // Fetch public results if released
-        if (data.election.resultsReleased) {
-          const { data: res } = await api.get(`/elections/${id}/results/public`);
-          setResults(res.results || []);
-        } else {
-          setMsg("Results are not yet released for this election.");
+        // Check if results are released before attempting to fetch
+        if (!data.election.resultsReleased) {
+          setMsg("Results are not yet released for this election. Please wait for the administrator to release the results.");
+          setLoading(false);
+          return;
         }
+
+        // Fetch public results only if released
+        const { data: res } = await api.get(`/elections/${id}/results/public`);
+        setResults(res.results || []);
       } catch (err) {
-        if (err.response?.status === 404) setMsg("Election not found.");
-        else if (err.response?.status === 403) setMsg("Results are not yet released.");
-        else setMsg(err?.response?.data?.message || "Error loading results");
+        if (err.response?.status === 404) {
+          setMsg("Election not found.");
+        } else if (err.response?.status === 403) {
+          setMsg("Results are not yet released for this election. Please wait for the administrator to release the results.");
+        } else {
+          setMsg(err?.response?.data?.message || "Error loading results");
+        }
       } finally {
         setLoading(false);
       }
@@ -120,11 +127,17 @@ export default function UserResults() {
 
       {!election.resultsReleased ? (
         <div style={styles.notReleasedCard}>
-          <span style={styles.notReleasedIcon}>⏳</span>
+          <span style={styles.notReleasedIcon}>🔒</span>
           <h3 style={styles.notReleasedTitle}>Results Not Yet Released</h3>
           <p style={styles.notReleasedText}>
-            The results for this election have not been released yet. Please check back later.
+            The results for this election have not been released yet by the administrator. 
+            Please wait for the official announcement before viewing results.
           </p>
+          <div style={styles.notReleasedInfo}>
+            <p style={styles.notReleasedNote}>
+              <strong>Note:</strong> Results will be made available to all users once the administrator releases them.
+            </p>
+          </div>
         </div>
       ) : results.length > 0 ? (
         <div style={styles.resultsContainer}>
@@ -459,8 +472,23 @@ const styles = {
   notReleasedText: {
     fontSize: '1rem',
     color: '#64748b',
-    margin: 0,
+    margin: '0 0 20px 0',
     lineHeight: '1.5'
+  },
+
+  notReleasedInfo: {
+    backgroundColor: '#fef3c7',
+    border: '1px solid #fbbf24',
+    borderRadius: '8px',
+    padding: '16px',
+    marginTop: '16px'
+  },
+
+  notReleasedNote: {
+    fontSize: '0.875rem',
+    color: '#92400e',
+    margin: 0,
+    lineHeight: '1.4'
   },
 
   resultsContainer: {
