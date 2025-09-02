@@ -7,35 +7,21 @@ import { requireRole } from '../middleware/requireRole.js';
 
 const router = express.Router();
 
-// --- Admin: create election with age groups ---
+/**
+ * --- Admin Routes ---
+ */
+
+// Create election
 router.post('/elections', auth, requireRole('admin'), async (req, res) => {
   try {
     const { title, candidates, startTime, endTime, eligibleAgeGroups } = req.body;
+    if (!title || !candidates) return res.status(400).json({ message: 'Title and candidates required' });
 
-    if (!title || !candidates) {
-      return res.status(400).json({ message: 'Title and candidates are required' });
-    }
+    const normalizedCandidates = Array.isArray(candidates)
+      ? candidates.map(c => c.trim()).filter(Boolean)
+      : candidates.split(',').map(c => c.trim()).filter(Boolean);
 
-    // ✅ Normalize candidates into array of trimmed strings
-    let normalizedCandidates = [];
-    if (Array.isArray(candidates)) {
-      normalizedCandidates = candidates.map(c => c.trim()).filter(Boolean);
-    } else if (typeof candidates === 'string') {
-      normalizedCandidates = candidates.split(',').map(c => c.trim()).filter(Boolean);
-    }
-
-    if (normalizedCandidates.length < 2) {
-      return res.status(400).json({ message: 'At least 2 candidates required' });
-    }
-
-    // Validate age groups
-    if (eligibleAgeGroups) {
-      for (const group of eligibleAgeGroups) {
-        if (group.min == null || group.max == null || group.min > group.max) {
-          return res.status(400).json({ message: 'Invalid age group' });
-        }
-      }
-    }
+    if (normalizedCandidates.length < 2) return res.status(400).json({ message: 'At least 2 candidates required' });
 
     const election = await Election.create({
       title,
@@ -43,7 +29,7 @@ router.post('/elections', auth, requireRole('admin'), async (req, res) => {
       startTime,
       endTime,
       status: 'scheduled',
-      eligibleAgeGroups: eligibleAgeGroups || []
+      eligibleAgeGroups: eligibleAgeGroups || [],
     });
 
     res.status(201).json(election);
@@ -53,31 +39,19 @@ router.post('/elections', auth, requireRole('admin'), async (req, res) => {
   }
 });
 
-// --- Admin: update election (general) ---
+// Update election
 router.put('/elections/:id', auth, requireRole('admin'), async (req, res) => {
   try {
     const updateData = { ...req.body };
-
-    // ✅ Normalize candidates if updating them
     if (updateData.candidates) {
-      if (Array.isArray(updateData.candidates)) {
-        updateData.candidates = updateData.candidates.map(c => c.trim()).filter(Boolean);
-      } else if (typeof updateData.candidates === 'string') {
-        updateData.candidates = updateData.candidates.split(',').map(c => c.trim()).filter(Boolean);
-      }
-    }
-
-    // Validate age groups
-    if (updateData.eligibleAgeGroups) {
-      for (const group of updateData.eligibleAgeGroups) {
-        if (group.min == null || group.max == null || group.min > group.max) {
-          return res.status(400).json({ message: 'Invalid age group' });
-        }
-      }
+      updateData.candidates = Array.isArray(updateData.candidates)
+        ? updateData.candidates.map(c => c.trim()).filter(Boolean)
+        : updateData.candidates.split(',').map(c => c.trim()).filter(Boolean);
     }
 
     const election = await Election.findByIdAndUpdate(req.params.id, updateData, { new: true });
     if (!election) return res.status(404).json({ message: 'Election not found' });
+
     res.json(election);
   } catch (err) {
     console.error(err);
@@ -85,88 +59,224 @@ router.put('/elections/:id', auth, requireRole('admin'), async (req, res) => {
   }
 });
 
-// --- Admin: extend voting time ---
-router.patch('/elections/:id/extend', auth, requireRole('admin'), async (req, res) => {
-  try {
-    const { extraMinutes } = req.body;
-    if (!extraMinutes || extraMinutes <= 0) {
-      return res.status(400).json({ message: 'extraMinutes must be positive' });
-    }
-
-    const election = await Election.findById(req.params.id);
-    if (!election) return res.status(404).json({ message: 'Election not found' });
-
-    election.endTime = new Date(election.endTime.getTime() + extraMinutes * 60000);
-    await election.save();
-
-    res.json({ message: `Voting extended by ${extraMinutes} minutes`, endTime: election.endTime });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
-
-// --- Admin: delete election ---
+// Delete election
 router.delete('/elections/:id', auth, requireRole('admin'), async (req, res) => {
   try {
     const election = await Election.findByIdAndDelete(req.params.id);
-    if (!election) return res.status(404).json({ message: 'Not found' });
+    if (!election) return res.status(404).json({ message: 'Election not found' });
     await Vote.deleteMany({ electionId: req.params.id });
-    res.json({ message: 'Deleted' });
+    res.json({ message: 'Deleted successfully' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// --- Admin: get election results ---
-router.get('/results/:electionId', auth, requireRole('admin'), async (req, res) => {
-  try {
-    const { electionId } = req.params;
-    const election = await Election.findById(electionId);
-    if (!election) return res.status(404).json({ message: 'Election not found' });
-
-    const byCandidate = await Vote.aggregate([
-      { $match: { electionId: election._id,option: { $ne: "" }  } },
-      { $group: { _id: '$option', count: { $sum: 1 } } },
-      { $project: { option: '$_id', count: 1, _id: 0 } },
-      { $sort: { count: -1 } } // sort by most votes
-    ]);
-
-    const results = byCandidate.map((item) => {
-      // If candidates are just IDs like "1", "2", map back to election.candidates
-      const candidate =
-        election.candidates.find((c) => c === item.option) || item.option;
-      return { candidate, count: item.count };
-    });
-
-    res.json({
-      election: {
-        id: election._id,
-        title: election.title,
-        candidates: election.candidates,
-      },
-      results,
-    });
-  } catch (err) {
-    console.error("Error fetching results:", err);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-// --- Admin: fraud logs ---
-router.get('/fraud', auth, requireRole('admin'), async (_req, res) => {
-  const logs = await FraudLog.find({}).sort({ createdAt: -1 }).limit(200);
-  res.json(logs);
-});
-
-// --- Admin: get all elections ---
+// Fetch all elections (admin only)
 router.get('/elections', auth, requireRole('admin'), async (_req, res) => {
   try {
     const elections = await Election.find({}).sort({ startTime: -1 });
     res.json(elections);
   } catch (err) {
     console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Fetch single election (admin only)
+router.get('/elections/:id', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const election = await Election.findById(req.params.id);
+    if (!election) return res.status(404).json({ message: 'Election not found' });
+    res.json({ election });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Suspend election
+router.patch('/elections/:id/suspend', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const election = await Election.findById(req.params.id);
+    if (!election) return res.status(404).json({ message: 'Election not found' });
+    if (election.status === 'suspended') return res.status(400).json({ message: 'Election already suspended' });
+
+    election.status = 'suspended';
+    await election.save();
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`election-${election._id}`).emit('election-suspended', {
+        electionId: election._id,
+        timestamp: new Date()
+      });
+
+      io.to('admin-room').emit('election-updated', {
+        electionId: election._id,
+        action: 'suspended',
+        timestamp: new Date()
+      });
+    }
+
+    res.json({ message: 'Election suspended successfully', election });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Resume election
+router.patch('/elections/:id/resume', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const election = await Election.findById(req.params.id);
+    if (!election) return res.status(404).json({ message: 'Election not found' });
+    if (election.status === 'active') return res.status(400).json({ message: 'Election already active' });
+
+    const { newEndDate } = req.body;
+    if (newEndDate) {
+      const parsedDate = new Date(newEndDate);
+      if (isNaN(parsedDate.getTime())) return res.status(400).json({ message: 'Invalid newEndDate format' });
+      election.endTime = parsedDate;
+    }
+
+    election.status = 'active';
+    await election.save();
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`election-${election._id}`).emit('election-resumed', {
+        electionId: election._id,
+        newEndDate: election.endTime,
+        timestamp: new Date()
+      });
+
+      io.to('admin-room').emit('election-updated', {
+        electionId: election._id,
+        action: 'resumed',
+        timestamp: new Date()
+      });
+    }
+
+    res.json({ message: 'Election resumed successfully', election });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Release results
+router.patch('/elections/:id/release-results', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const election = await Election.findById(req.params.id);
+    if (!election) return res.status(404).json({ message: 'Election not found' });
+    if (election.resultsReleased) return res.status(400).json({ message: 'Results already released' });
+
+    election.resultsReleased = true;
+    await election.save();
+
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`election-${election._id}`).emit('results-released', {
+        electionId: election._id,
+        timestamp: new Date()
+      });
+
+      io.to('admin-room').emit('election-updated', {
+        electionId: election._id,
+        action: 'results-released',
+        timestamp: new Date()
+      });
+    }
+
+    res.json({ message: 'Results released successfully', election });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Fetch admin results
+router.get('/results/:id', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const election = await Election.findById(req.params.id);
+    if (!election) return res.status(404).json({ message: 'Election not found' });
+
+    // First, let's see what votes exist for this election
+    const allVotes = await Vote.find({ electionId: election._id });
+
+    // Simple approach: count votes for each candidate
+    const voteCounts = {};
+    allVotes.forEach(vote => {
+      if (vote.option && vote.option.trim() !== '') {
+        voteCounts[vote.option] = (voteCounts[vote.option] || 0) + 1;
+      }
+    });
+
+    // Convert to array format
+    const results = Object.entries(voteCounts)
+      .map(([candidate, count]) => ({ candidate, count }))
+      .sort((a, b) => b.count - a.count);
+
+    res.json({ election, results });
+  } catch (err) {
+    console.error('Admin results error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Extend election (Admin)
+router.patch('/elections/:id/extend', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const { newEndDate } = req.body;
+    const election = await Election.findById(req.params.id);
+    if (!election) return res.status(404).json({ message: 'Election not found' });
+
+    if (!newEndDate) return res.status(400).json({ message: 'newEndDate is required' });
+    const parsedDate = new Date(newEndDate);
+    if (isNaN(parsedDate.getTime())) return res.status(400).json({ message: 'Invalid date format' });
+
+    election.endTime = parsedDate;
+    election.status = 'active'; // ensure election is active after extension
+    await election.save();
+
+    res.json({ message: 'Election extended successfully', election });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Fraud logs
+router.get('/fraud', auth, requireRole('admin'), async (_req, res) => {
+  const logs = await FraudLog.find({}).sort({ createdAt: -1 }).limit(200);
+  res.json(logs);
+});
+
+// Debug endpoint to check votes
+router.get('/debug/votes/:electionId', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const { electionId } = req.params;
+    
+    const votes = await Vote.find({ electionId });
+    
+    const voteDetails = votes.map(v => ({
+      id: v._id,
+      userId: v.userId,
+      option: v.option,
+      createdAt: v.createdAt
+    }));
+    
+    res.json({ 
+      electionId, 
+      totalVotes: votes.length, 
+      votes: voteDetails 
+    });
+  } catch (err) {
+    console.error('Debug votes error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });

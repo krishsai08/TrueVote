@@ -11,11 +11,10 @@ import Vote from '../models/Vote.js';
 const router = express.Router();
 
 // USER REGISTER
-// USER REGISTER
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, faceEmbedding, faceImageBase64, age, occupation } = req.body;
-    if (!name || !email || !password || !age) 
+    const { name, email, password, faceEmbedding, faceImageBase64, dateOfBirth, occupation } = req.body;
+    if (!name || !email || !password || !dateOfBirth) 
       return res.status(400).json({ message: 'Missing required fields' });
 
     const exists = await User.findOne({ email });
@@ -26,7 +25,7 @@ router.post('/register', async (req, res) => {
       name,
       email,
       passwordHash,
-      age,
+      dateOfBirth: new Date(dateOfBirth),
       occupation,
       faceEmbedding: faceEmbedding || [],
       faceImageBase64: faceImageBase64 || ''
@@ -38,7 +37,6 @@ router.post('/register', async (req, res) => {
     return res.status(500).json({ message: 'Server error' });
   }
 });
-
 
 // USER LOGIN
 router.post('/login', async (req, res) => {
@@ -62,32 +60,82 @@ router.post('/login', async (req, res) => {
 
 // GET PROFILE
 router.get('/me', auth, async (req, res) => {
-  const user = await User.findById(req.user.id).lean();
+  const user = await User.findById(req.user._id).lean();
   if (!user) return res.status(404).json({ message: 'Not found' });
 
   res.json({
-  id: user._id,
-  name: user.name,
-  role: user.role,
-  age: user.age,
-  occupation: user.occupation,
-  faceEmbedding: user.faceEmbedding,
-  faceImageBase64: user.faceImageBase64
-});
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    dateOfBirth: user.dateOfBirth,
+    age: user.age,
+    occupation: user.occupation,
+    faceEmbedding: user.faceEmbedding,
+    faceImageBase64: user.faceImageBase64
+  });
 });
 
-// USER VOTES: see which votes user has polled
-router.get('/my-votes', auth, async (req, res) => {
+// UPDATE PROFILE
+router.put('/profile', auth, async (req, res) => {
   try {
-    const votes = await Vote.find({ userId: req.user.id }).populate('electionId', 'title');
-    const result = votes.map(v => ({
-      election: v.electionId?.title || 'Unknown',
-      option: v.candidate,        // candidate voted
-      timestamp: v.timestamp
-    }));
-    res.json(result);
+    const { name, dateOfBirth, occupation } = req.body;
+    const updateData = {};
+
+    if (name) updateData.name = name;
+    if (dateOfBirth) updateData.dateOfBirth = new Date(dateOfBirth);
+    if (occupation !== undefined) updateData.occupation = occupation;
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id, 
+      updateData, 
+      { new: true, runValidators: true }
+    );
+
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    res.json({
+      id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      dateOfBirth: user.dateOfBirth,
+      age: user.age,
+      occupation: user.occupation,
+      faceEmbedding: user.faceEmbedding,
+      faceImageBase64: user.faceImageBase64
+    });
   } catch (err) {
-    console.error(err);
+    console.error('Profile update error:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// CHANGE PASSWORD
+router.put('/password', auth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Current and new password are required' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Verify current password
+    if (!(await comparePassword(currentPassword, user.passwordHash))) {
+      return res.status(400).json({ message: 'Current password is incorrect' });
+    }
+
+    // Hash new password
+    const newPasswordHash = await hashPassword(newPassword);
+    user.passwordHash = newPasswordHash;
+    await user.save();
+
+    res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('Password change error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -127,7 +175,7 @@ router.get('/results/:electionId', auth, async (req, res) => {
 
     const totalVotes = votes.length;
     const votesByOption = votes.reduce((acc, vote) => {
-      acc[vote.candidate] = (acc[vote.candidate] || 0) + 1;
+      acc[vote.option] = (acc[vote.option] || 0) + 1; // Use option instead of candidate
       return acc;
     }, {});
 
