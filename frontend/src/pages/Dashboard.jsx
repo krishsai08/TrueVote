@@ -432,6 +432,10 @@ export default function Dashboard() {
                 <span style={styles.actionIcon}>📊</span>
                 <span style={styles.actionText}>View Results</span>
               </button>
+              <button style={styles.actionBtn} onClick={() => navigate('/admin/fraud-logs')}>
+                <span style={styles.actionIcon}>🚨</span>
+                <span style={styles.actionText}>Fraud Logs</span>
+              </button>
               <button style={styles.actionBtn} onClick={() => navigate('/admin/announcements')}>
                 <span style={styles.actionIcon}>📢</span>
                 <span style={styles.actionText}>Announcements</span>

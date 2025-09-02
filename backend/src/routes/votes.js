@@ -7,6 +7,7 @@ import OTP from '../models/OTP.js';
 import { auth } from '../middleware/auth.js';
 import { getClientIP } from '../utils/ip.js';
 import { sendVoteConfirmationEmail } from '../utils/email.js';
+import { createFraudLog, detectSuspiciousPatterns } from '../utils/fraudLogger.js';
 
 const router = express.Router();
 
@@ -46,17 +47,29 @@ router.post('/:electionId', auth, async (req, res) => {
     }
 
     if (!faceVerified) {
-      await FraudLog.create({
+      await createFraudLog({
         userId: req.user._id,
         electionId,
         type: 'FaceMismatch',
-        details: 'Client reported faceVerified=false'
+        severity: 'high',
+        details: 'Client reported faceVerified=false - Face recognition failed during voting',
+        req,
+        metadata: { faceVerified: false, votingAttempt: true }
       });
       return res.status(400).json({ message: 'Face verification failed' });
     }
 
     // Check OTP verification
     if (!verificationToken) {
+      await createFraudLog({
+        userId: req.user._id,
+        electionId,
+        type: 'OTPVerificationFailed',
+        severity: 'medium',
+        details: 'Voting attempt without OTP verification token',
+        req,
+        metadata: { hasVerificationToken: false }
+      });
       return res.status(400).json({ message: 'OTP verification required. Please verify your OTP first.' });
     }
 
@@ -68,6 +81,15 @@ router.post('/:electionId', auth, async (req, res) => {
     });
 
     if (!otpRecord) {
+      await createFraudLog({
+        userId: req.user._id,
+        electionId,
+        type: 'OTPVerificationFailed',
+        severity: 'medium',
+        details: 'Voting attempt without valid OTP verification record',
+        req,
+        metadata: { hasOtpRecord: false, verificationToken: verificationToken ? 'present' : 'missing' }
+      });
       return res.status(400).json({ message: 'OTP verification required. Please verify your OTP first.' });
     }
 
@@ -94,6 +116,15 @@ router.post('/:electionId', auth, async (req, res) => {
       : true; // If no age groups specified, everyone is eligible
 
     if (!eligible) {
+      await createFraudLog({
+        userId: req.user._id,
+        electionId,
+        type: 'AgeEligibilityViolation',
+        severity: 'medium',
+        details: `User attempted to vote but age (${userAge}) does not meet eligibility requirements`,
+        req,
+        metadata: { userAge, eligibleAgeGroups: election.eligibleAgeGroups }
+      });
       return res
         .status(403)
         .json({ 
@@ -103,6 +134,9 @@ router.post('/:electionId', auth, async (req, res) => {
 
     const ip = getClientIP(req);
     const userAgent = req.headers['user-agent'] || '';
+
+    // Detect suspicious patterns before allowing vote
+    await detectSuspiciousPatterns(req.user._id, electionId, req);
 
     const vote = await Vote.create({
       electionId,
@@ -173,11 +207,14 @@ router.post('/:electionId', auth, async (req, res) => {
   } catch (e) {
     console.error('Vote creation error:', e);
     if (e?.code === 11000) {
-      await FraudLog.create({
+      await createFraudLog({
         userId: req.user._id,
         electionId: req.params.electionId,
         type: 'RepeatVoteAttempt',
-        details: 'User attempted to vote again'
+        severity: 'high',
+        details: 'User attempted to vote multiple times in the same election',
+        req,
+        metadata: { duplicateVoteAttempt: true, errorCode: e.code }
       });
       return res
         .status(409)

@@ -26,7 +26,8 @@ const io = new Server(server, {
     origin: config.CORS_ORIGIN || "http://localhost:5173",
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+  transports: ['websocket', 'polling']
 });
 
 app.use(helmet());

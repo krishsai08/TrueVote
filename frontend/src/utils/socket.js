@@ -10,7 +10,7 @@ class SocketManager {
   connect() {
     if (this.socket && this.isConnected) return;
 
-    const baseURL = import.meta.env.VITE_API_BASE || 'http://localhost:5000';
+    const baseURL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
     this.socket = io(baseURL, {
       transports: ['websocket', 'polling'],
       autoConnect: true,

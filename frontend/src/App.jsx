@@ -12,6 +12,7 @@ import UserResults from "./pages/UserResults";
 import UserProfile from "./pages/UserProfile";
 import AdminResults from "./pages/AdminResults";
 import AdminAnnouncements from "./pages/AdminAnnouncements";
+import AdminFraudLogs from "./pages/AdminFraudLogs";
 import ConnectionStatus from "./components/ConnectionStatus";
 import { useAuth } from "./context/AuthContext";
 
@@ -53,6 +54,7 @@ export default function App() {
               <>
                 <Link style={styles.link} to="/admin/elections">Manage Elections</Link>
                 <Link style={styles.link} to="/admin/results">Analytics</Link>
+                <Link style={styles.link} to="/admin/fraud-logs">Fraud Logs</Link>
                 <Link style={styles.link} to="/admin/announcements">Announcements</Link>
               </>
             )}
@@ -81,6 +83,7 @@ export default function App() {
             <Route path="/admin/elections" element={<PrivateRoute roles={["admin"]}><AdminElections /></PrivateRoute>} />
             <Route path="/admin/elections/:id" element={<PrivateRoute roles={["admin"]}><ElectionDetails /></PrivateRoute>} />
             <Route path="/admin/results" element={<PrivateRoute roles={["admin"]}><AdminResults /></PrivateRoute>} />
+            <Route path="/admin/fraud-logs" element={<PrivateRoute roles={["admin"]}><AdminFraudLogs /></PrivateRoute>} />
             <Route path="/admin/announcements" element={<PrivateRoute roles={["admin"]}><AdminAnnouncements /></PrivateRoute>} />
 
             {/* User results */}

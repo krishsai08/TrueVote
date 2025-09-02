@@ -250,10 +250,199 @@ router.patch('/elections/:id/extend', auth, requireRole('admin'), async (req, re
   }
 });
 
-// Fraud logs
-router.get('/fraud', auth, requireRole('admin'), async (_req, res) => {
-  const logs = await FraudLog.find({}).sort({ createdAt: -1 }).limit(200);
-  res.json(logs);
+// Fraud logs - Get all fraud logs with filtering and pagination
+router.get('/fraud', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 50,
+      type,
+      severity,
+      resolved,
+      electionId,
+      userId,
+      startDate,
+      endDate
+    } = req.query;
+
+    const filter = {};
+    
+    if (type) filter.type = type;
+    if (severity) filter.severity = severity;
+    if (resolved !== undefined) filter.resolved = resolved === 'true';
+    if (electionId) filter.electionId = electionId;
+    if (userId) filter.userId = userId;
+    
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    const logs = await FraudLog.find(filter)
+      .populate('userId', 'name username email')
+      .populate('electionId', 'title')
+      .populate('resolvedBy', 'name username')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await FraudLog.countDocuments(filter);
+
+    res.json({
+      logs,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching fraud logs:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Fraud statistics
+router.get('/fraud/statistics', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const { getFraudStatistics } = await import('../utils/fraudLogger.js');
+    const stats = await getFraudStatistics();
+    res.json(stats);
+  } catch (err) {
+    console.error('Error fetching fraud statistics:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Get single fraud log
+router.get('/fraud/:id', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const log = await FraudLog.findById(req.params.id)
+      .populate('userId', 'name username email dateOfBirth')
+      .populate('electionId', 'title startTime endTime')
+      .populate('resolvedBy', 'name username');
+    
+    if (!log) {
+      return res.status(404).json({ message: 'Fraud log not found' });
+    }
+    
+    res.json(log);
+  } catch (err) {
+    console.error('Error fetching fraud log:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Resolve fraud log
+router.patch('/fraud/:id/resolve', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const { resolutionNotes } = req.body;
+    
+    const log = await FraudLog.findById(req.params.id);
+    if (!log) {
+      return res.status(404).json({ message: 'Fraud log not found' });
+    }
+    
+    if (log.resolved) {
+      return res.status(400).json({ message: 'Fraud log already resolved' });
+    }
+    
+    log.resolved = true;
+    log.resolvedBy = req.user._id;
+    log.resolvedAt = new Date();
+    log.resolutionNotes = resolutionNotes || '';
+    
+    await log.save();
+    
+    // Emit real-time update
+    const io = req.app.get('io');
+    if (io) {
+      io.to('admin-room').emit('fraud-resolved', {
+        fraudLogId: log._id,
+        resolvedBy: req.user._id,
+        timestamp: new Date()
+      });
+    }
+    
+    res.json({ message: 'Fraud log resolved successfully', log });
+  } catch (err) {
+    console.error('Error resolving fraud log:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Unresolve fraud log
+router.patch('/fraud/:id/unresolve', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const log = await FraudLog.findById(req.params.id);
+    if (!log) {
+      return res.status(404).json({ message: 'Fraud log not found' });
+    }
+    
+    if (!log.resolved) {
+      return res.status(400).json({ message: 'Fraud log is not resolved' });
+    }
+    
+    log.resolved = false;
+    log.resolvedBy = undefined;
+    log.resolvedAt = undefined;
+    log.resolutionNotes = '';
+    
+    await log.save();
+    
+    res.json({ message: 'Fraud log unresolved successfully', log });
+  } catch (err) {
+    console.error('Error unresolving fraud log:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Delete fraud log
+router.delete('/fraud/:id', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const log = await FraudLog.findByIdAndDelete(req.params.id);
+    if (!log) {
+      return res.status(404).json({ message: 'Fraud log not found' });
+    }
+    
+    res.json({ message: 'Fraud log deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting fraud log:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Bulk resolve fraud logs
+router.patch('/fraud/bulk/resolve', auth, requireRole('admin'), async (req, res) => {
+  try {
+    const { logIds, resolutionNotes } = req.body;
+    
+    if (!Array.isArray(logIds) || logIds.length === 0) {
+      return res.status(400).json({ message: 'Log IDs array is required' });
+    }
+    
+    const result = await FraudLog.updateMany(
+      { _id: { $in: logIds }, resolved: false },
+      {
+        resolved: true,
+        resolvedBy: req.user._id,
+        resolvedAt: new Date(),
+        resolutionNotes: resolutionNotes || 'Bulk resolved'
+      }
+    );
+    
+    res.json({ 
+      message: `${result.modifiedCount} fraud logs resolved successfully`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (err) {
+    console.error('Error bulk resolving fraud logs:', err);
+    res.status(500).json({ message: 'Server error' });
+  }
 });
 
 // Debug endpoint to check votes
