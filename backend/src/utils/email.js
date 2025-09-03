@@ -251,7 +251,7 @@ export const sendVoteConfirmationEmail = async (to, userName, electionTitle, can
             
             <div class="footer">
               <p>This is an automated confirmation from Smart eVoting System</p>
-              <p>© 2024 Smart eVoting. All rights reserved.</p>
+              <p>© 2025 TrueEVote Smart eVoting. All rights reserved.</p>
             </div>
           </div>
         </body>
