@@ -184,8 +184,8 @@ const generateOTPEmailTemplate = (userName, otp, electionTitle) => {
         
         <div class="footer">
           <p>This is an automated message from Smart eVoting System</p>
-          <p>For support, contact: support@smartEVote.com</p>
-          <p>© 2024 Smart eVoting. All rights reserved.</p>
+          <p>For support, contact: trueevote@gmail.com</p>
+          <p>© 2025 TrueEVote Smart eVoting. All rights reserved.</p>
         </div>
       </div>
     </body>
