@@ -2,6 +2,8 @@ import express from 'express';
 import Election from '../models/Election.js';
 import Vote from '../models/Vote.js';
 import { auth } from '../middleware/auth.js';
+import { generateElectionResultsPDF } from '../utils/pdfGenerator.js';
+import { generateSimpleElectionResultsPDF } from '../utils/simplePdfGenerator.js';
 
 const router = express.Router();
 
@@ -148,5 +150,85 @@ router.get('/:id/results/public', auth, async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 });
+
+// Download results as PDF (admin only)
+router.get('/:id/results/pdf', auth, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ 
+        message: 'Access denied. Only administrators can download PDFs.',
+        code: 'ADMIN_ONLY'
+      });
+    }
+
+    const election = await Election.findById(req.params.id);
+    if (!election) return res.status(404).json({ message: 'Election not found' });
+    if (!election.resultsReleased) {
+      return res.status(403).json({ 
+        message: 'Results not yet released by administrator',
+        code: 'RESULTS_NOT_RELEASED'
+      });
+    }
+
+    const byCandidate = await Vote.aggregate([
+      { $match: { electionId: election._id, option: { $ne: "" } } },
+      { $group: { _id: "$option", count: { $sum: 1 } } },
+      { $project: { candidate: "$_id", count: 1, _id: 0 } },
+      { $sort: { count: -1 } },
+    ]);
+
+    const results = byCandidate.map(item => ({
+      candidate: election.candidates.find(c => c === item.candidate) || item.candidate,
+      count: item.count,
+    }));
+
+    // Generate PDF - try Puppeteer first, fallback to jsPDF
+    let pdfBuffer;
+    try {
+      pdfBuffer = await generateElectionResultsPDF(election, results);
+    } catch (puppeteerError) {
+      console.warn('Puppeteer PDF generation failed, using jsPDF fallback:', puppeteerError.message);
+      try {
+        pdfBuffer = generateSimpleElectionResultsPDF(election, results);
+      } catch (jsPDFError) {
+        console.error('jsPDF generation also failed:', jsPDFError.message);
+        throw new Error('Both PDF generation methods failed');
+      }
+    }
+    
+    // Validate PDF buffer
+    if (!pdfBuffer || pdfBuffer.length === 0) {
+      throw new Error('Generated PDF is empty');
+    }
+    
+    // Convert ArrayBuffer to Buffer if needed
+    if (pdfBuffer instanceof ArrayBuffer) {
+      pdfBuffer = Buffer.from(pdfBuffer);
+    }
+    
+    // Create safe filename
+    const safeTitle = election.title.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-');
+    const filename = `election-results-${safeTitle}-${new Date().toISOString().split('T')[0]}.pdf`;
+    
+    // Set response headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Pragma', 'no-cache');
+    
+    // Send the PDF buffer
+    res.end(pdfBuffer);
+  } catch (err) {
+    console.error('PDF generation error:', err);
+    res.status(500).json({ 
+      message: 'Failed to generate PDF',
+      error: err.message 
+    });
+  }
+});
+
+
 
 export default router;

@@ -15,6 +15,7 @@ import AdminAnnouncements from "./pages/AdminAnnouncements";
 import AdminFraudLogs from "./pages/AdminFraudLogs";
 import ConnectionStatus from "./components/ConnectionStatus";
 import ResultsGuard from "./components/ResultsGuard";
+import SessionTimeout from "./components/SessionTimeout";
 import { useAuth } from "./context/AuthContext";
 
 // 🔒 Wrapper for protected routes
@@ -36,6 +37,9 @@ export default function App() {
       <div style={styles.container}>
         {/* WebSocket Connection Status */}
         {user && <ConnectionStatus />}
+        
+        {/* Session Timeout Warning */}
+        {user && <SessionTimeout />}
 
         {/* Navigation */}
         <nav style={styles.navbar}>

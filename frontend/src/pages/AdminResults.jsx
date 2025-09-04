@@ -9,6 +9,7 @@ export default function AdminResults() {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [downloadingPDF, setDownloadingPDF] = useState(false);
 
   useEffect(() => {
     fetchElections();
@@ -58,6 +59,49 @@ export default function AdminResults() {
 
   const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"];
 
+  const handleDownloadPDF = async () => {
+    if (!selectedElection || results.length === 0) return;
+    
+    setDownloadingPDF(true);
+    try {
+      const response = await api.get(`/elections/${selectedElection._id}/results/pdf`, {
+        responseType: 'blob'
+      });
+      
+      // Validate response
+      if (!response.data || response.data.size === 0) {
+        throw new Error('PDF file is empty');
+      }
+      
+      // Create blob link to download
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from response headers or create default
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = `election-results-${selectedElection.title.replace(/[^a-zA-Z0-9]/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`;
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('PDF download error:', error);
+      setError(`Failed to download PDF: ${error.message}. Please try again.`);
+    } finally {
+      setDownloadingPDF(false);
+    }
+  };
+
   return (
     <div style={styles.container}>
       {/* Header */}
@@ -68,6 +112,31 @@ export default function AdminResults() {
         </Link>
         <h1 style={styles.title}>Election Results Dashboard</h1>
         <p style={styles.subtitle}>Monitor and analyze election results in real-time</p>
+        
+        {selectedElection && results.length > 0 && (
+          <div style={styles.downloadSection}>
+            <button 
+              onClick={handleDownloadPDF}
+              disabled={downloadingPDF}
+              style={{
+                ...styles.downloadButton,
+                ...(downloadingPDF && styles.downloadButtonLoading)
+              }}
+            >
+              {downloadingPDF ? (
+                <>
+                  <span style={styles.downloadSpinner}>⏳</span>
+                  Generating PDF...
+                </>
+              ) : (
+                <>
+                  <span style={styles.downloadIcon}>📄</span>
+                  Download Results PDF
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Election Selector */}
@@ -317,6 +386,43 @@ const styles = {
     fontSize: '1.1rem',
     color: '#64748b',
     margin: 0
+  },
+
+  downloadSection: {
+    marginTop: '20px'
+  },
+
+  downloadButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '16px 32px',
+    backgroundColor: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '12px',
+    fontSize: '16px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+    boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+    textDecoration: 'none'
+  },
+
+  downloadButtonLoading: {
+    opacity: 0.7,
+    cursor: 'not-allowed',
+    transform: 'none'
+  },
+
+  downloadIcon: {
+    fontSize: '20px'
+  },
+
+  downloadSpinner: {
+    fontSize: '20px',
+    animation: 'spin 1s linear infinite'
   },
 
   selectorSection: {
@@ -696,6 +802,11 @@ styleSheet.textContent = `
   
   .topRow {
     background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  }
+  
+  .downloadButton:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
   }
 `;
 document.head.appendChild(styleSheet); 

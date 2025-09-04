@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
+import { useAuth } from "../context/AuthContext";
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 
 export default function UserResults() {
   const { id } = useParams();
+  const { user } = useAuth();
   const [election, setElection] = useState(null);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
+  const [downloadingPDF, setDownloadingPDF] = useState(false);
 
   useEffect(() => {
     const fetchElectionAndResults = async () => {
@@ -43,6 +46,51 @@ export default function UserResults() {
     fetchElectionAndResults();
   }, [id]);
 
+  const handleDownloadPDF = async () => {
+    if (!election || !election.resultsReleased) return;
+    
+    setDownloadingPDF(true);
+    try {
+      const response = await api.get(`/elections/${id}/results/pdf`, {
+        responseType: 'blob'
+      });
+      
+      // Validate response
+      if (!response.data || response.data.size === 0) {
+        throw new Error('PDF file is empty');
+      }
+      
+      // Create blob link to download
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from response headers or create default
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = `election-results-${election.title.replace(/[^a-zA-Z0-9]/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`;
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('PDF download error:', error);
+      setMsg(`Failed to download PDF: ${error.message}. Please try again.`);
+    } finally {
+      setDownloadingPDF(false);
+    }
+  };
+
+
+
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
@@ -75,6 +123,31 @@ export default function UserResults() {
         </Link>
         <h1 style={styles.title}>Election Results</h1>
         <p style={styles.subtitle}>View the official results for this election</p>
+        
+        {election && election.resultsReleased && results.length > 0 && user?.role === 'admin' && (
+          <div style={styles.downloadSection}>
+            <button 
+              onClick={handleDownloadPDF}
+              disabled={downloadingPDF}
+              style={{
+                ...styles.downloadButton,
+                ...(downloadingPDF && styles.downloadButtonLoading)
+              }}
+            >
+              {downloadingPDF ? (
+                <>
+                  <span style={styles.downloadSpinner}>⏳</span>
+                  Generating PDF...
+                </>
+              ) : (
+                <>
+                  <span style={styles.downloadIcon}>📄</span>
+                  Download Results PDF
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Election Info Card */}
@@ -383,6 +456,45 @@ const styles = {
     color: '#64748b',
     margin: 0
   },
+
+  downloadSection: {
+    marginTop: '20px'
+  },
+
+  downloadButton: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '12px',
+    padding: '16px 32px',
+    backgroundColor: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '12px',
+    fontSize: '16px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.3s ease',
+    boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+    textDecoration: 'none'
+  },
+
+  downloadButtonLoading: {
+    opacity: 0.7,
+    cursor: 'not-allowed',
+    transform: 'none'
+  },
+
+  downloadIcon: {
+    fontSize: '20px'
+  },
+
+  downloadSpinner: {
+    fontSize: '20px',
+    animation: 'spin 1s linear infinite'
+  },
+
+
 
   electionInfoCard: {
     backgroundColor: 'white',
@@ -771,5 +883,12 @@ styleSheet.textContent = `
   .topRow {
     background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
   }
+  
+  .downloadButton:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+  }
+  
+
 `;
 document.head.appendChild(styleSheet);

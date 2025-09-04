@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import api from "../api/client";
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { useAuth } from "../context/AuthContext";
@@ -8,11 +8,13 @@ import socketManager from "../utils/socket.js";
 export default function ElectionDetails() {
   const { id } = useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [election, setElection] = useState(null);
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [downloadingPDF, setDownloadingPDF] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -126,6 +128,49 @@ export default function ElectionDetails() {
     }
   };
 
+  const handleDownloadPDF = async () => {
+    if (!election || results.length === 0) return;
+    
+    setDownloadingPDF(true);
+    try {
+      const response = await api.get(`/elections/${id}/results/pdf`, {
+        responseType: 'blob'
+      });
+      
+      // Validate response
+      if (!response.data || response.data.size === 0) {
+        throw new Error('PDF file is empty');
+      }
+      
+      // Create blob link to download
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from response headers or create default
+      const contentDisposition = response.headers['content-disposition'];
+      let filename = `election-results-${election.title.replace(/[^a-zA-Z0-9]/g, '-')}-${new Date().toISOString().split('T')[0]}.pdf`;
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('PDF download error:', error);
+      setMsg(`Failed to download PDF: ${error.message}. Please try again.`);
+    } finally {
+      setDownloadingPDF(false);
+    }
+  };
+
   if (loading) return <p>Loading...</p>;
   if (!election) return <p>{msg}</p>;
 
@@ -148,6 +193,15 @@ export default function ElectionDetails() {
         <div style={styles.adminActions}>
           {!election.resultsReleased && (
             <button style={styles.releaseBtn} onClick={releaseResults}>Release Results</button>
+          )}
+          {results.length > 0 && (
+            <button 
+              style={styles.downloadBtn} 
+              onClick={handleDownloadPDF}
+              disabled={downloadingPDF}
+            >
+              {downloadingPDF ? '⏳ Generating PDF...' : '📄 Download PDF'}
+            </button>
           )}
           <button style={styles.deleteBtn} onClick={() => setShowDeleteConfirm(true)}>Delete Election</button>
         </div>
@@ -276,6 +330,18 @@ const styles = {
     border: "none",
     cursor: "pointer",
     fontWeight: "bold",
+  },
+  downloadBtn: {
+    backgroundColor: "#667eea",
+    color: "#fff",
+    padding: "8px 15px",
+    borderRadius: 6,
+    border: "none",
+    cursor: "pointer",
+    fontWeight: "bold",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
   },
   overlay: {
     position: "fixed",
